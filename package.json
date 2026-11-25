@@ -10,5 +10,5 @@
     "db:validate": "npm run prisma:validate -w @code-junk/api",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
-  "engines": { "node": ">=22" }
+  "engines": { "node": ">=24.7" }
 }

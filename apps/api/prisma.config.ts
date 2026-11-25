@@ -1,4 +1,9 @@
+import { fileURLToPath } from "node:url";
+import { config } from "dotenv";
 import { defineConfig, env } from "prisma/config";
+
+// The single .env lives at the repository root.
+config({ path: fileURLToPath(new URL("../../.env", import.meta.url)), quiet: true });
 
 export default defineConfig({
   schema: "prisma/schema.prisma",

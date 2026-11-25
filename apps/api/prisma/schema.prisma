@@ -5,7 +5,8 @@
 //  * History tables (attempts, submissions, reviews) are append-only.
 
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
 }
 
 datasource db {
@@ -114,7 +115,10 @@ enum GoalStatus {
 
 enum SessionStatus {
   SCHEDULED
+  IN_PROGRESS
+  PAUSED
   COMPLETED
+  CANCELLED
   SKIPPED
   RESCHEDULED
 }
@@ -136,6 +140,7 @@ enum PreparationStatus {
 enum SubmissionStatus {
   NOT_STARTED
   IN_PROGRESS
+  COMPLETED
   SUBMITTED
   GRADED
   LATE
@@ -180,9 +185,9 @@ model User {
   passwordHash  String // argon2id
   name          String
   avatarUrl     String?
-  emailVerified DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  emailVerified DateTime? @db.Timestamptz(3)
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime  @updatedAt @db.Timestamptz(3)
 
   preferences   UserPreferences?
   sessions      Session[]
@@ -210,6 +215,8 @@ model User {
   documents     UploadedDocument[]
   aiLogs        AiRequestLog[]
   activity      ActivityLog[]
+  milestones    LearningMilestone[]
+  focusSessions FocusSession[]
 }
 
 model UserPreferences {
@@ -226,11 +233,18 @@ model UserPreferences {
   revisionDay         Int             @default(0) // 0 = Sunday … 6 = Saturday
   revisionSessionSize Int             @default(20)
   weekStartsOn        Int             @default(1) // calendar: 1 = Monday
+  defaultDifficulty   Difficulty?
+  defaultSubjectIds   String[]
+  notifyRevision      Boolean         @default(true)
+  notifySessions      Boolean         @default(true)
+  notifyAssignments   Boolean         @default(true)
+  notifyExams         Boolean         @default(true)
+  notifyEvents        Boolean         @default(true)
   notifyInApp         Boolean         @default(true)
   notifyEmail         Boolean         @default(false)
   notifyPush          Boolean         @default(false)
   defaultReminderMins Int             @default(30)
-  updatedAt           DateTime        @updatedAt
+  updatedAt           DateTime        @updatedAt @db.Timestamptz(3)
 }
 
 model Session {
@@ -240,9 +254,9 @@ model Session {
   csrfSecret String
   userAgent  String?
   ipHash     String?
-  createdAt  DateTime @default(now())
-  lastSeenAt DateTime @default(now())
-  expiresAt  DateTime
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  lastSeenAt DateTime @default(now()) @db.Timestamptz(3)
+  expiresAt  DateTime @db.Timestamptz(3)
 
   @@index([userId])
   @@index([expiresAt])
@@ -253,9 +267,9 @@ model PasswordResetToken {
   userId    String
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   tokenHash String    @unique
-  expiresAt DateTime
-  usedAt    DateTime?
-  createdAt DateTime  @default(now())
+  expiresAt DateTime  @db.Timestamptz(3)
+  usedAt    DateTime? @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
 
   @@index([userId])
 }
@@ -269,8 +283,8 @@ model AiCredential {
   encryptedKey String
   keyLast4     String
   model        String? // optional model override
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  createdAt    DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime       @updatedAt @db.Timestamptz(3)
 
   @@unique([userId, provider])
 }
@@ -288,21 +302,22 @@ model Subject {
   icon        String? // lucide icon name
   isCoding    Boolean   @default(true) // false hides language pickers (e.g. Mathematics)
   defaultLang String?
-  archivedAt  DateTime?
+  archivedAt  DateTime? @db.Timestamptz(3)
   position    Int       @default(0)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
 
-  topics      Topic[]
-  collections CodeCollection[]
-  snippets    CodeSnippet[]
-  questions   Question[]
-  quizzes     Quiz[]
-  papers      PracticePaper[]
-  goals       LearningGoal[]
-  sessions    LearningSession[]
-  events      CalendarEvent[]
-  documents   UploadedDocument[]
+  topics        Topic[]
+  collections   CodeCollection[]
+  snippets      CodeSnippet[]
+  questions     Question[]
+  quizzes       Quiz[]
+  papers        PracticePaper[]
+  goals         LearningGoal[]
+  sessions      LearningSession[]
+  events        CalendarEvent[]
+  documents     UploadedDocument[]
+  focusSessions FocusSession[]
 
   @@unique([userId, slug])
   @@index([userId, position])
@@ -320,8 +335,8 @@ model Topic {
   name      String
   slug      String
   position  Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
   snippets    CodeSnippet[]
   questions   Question[]        @relation("QuestionTopic")
@@ -342,7 +357,7 @@ model Tag {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   name      String
   color     String?
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
 
   snippets  SnippetTag[]
   questions QuestionTag[]
@@ -361,8 +376,8 @@ model CodeCollection {
   name        String
   description String?
   position    Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
 
   snippets CodeSnippet[]
 
@@ -388,9 +403,9 @@ model CodeSnippet {
   position     Int               @default(0) // booklet page order
   sourceFileId String?
   sourceFile   UploadedDocument? @relation(fields: [sourceFileId], references: [id], onDelete: SetNull)
-  lastOpenedAt DateTime?
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
+  lastOpenedAt DateTime?         @db.Timestamptz(3)
+  createdAt    DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime          @updatedAt @db.Timestamptz(3)
 
   tags SnippetTag[]
 
@@ -418,8 +433,8 @@ model QuestionCollection {
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   name        String
   description String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
 
   questions Question[]
 
@@ -461,14 +476,14 @@ model Question {
   sourceDocument     UploadedDocument?   @relation(fields: [sourceDocumentId], references: [id], onDelete: SetNull)
   aiRequestId        String? // provenance for AI-generated questions
   colorMark          ColorMark?
-  colorMarkedAt      DateTime?
+  colorMarkedAt      DateTime?           @db.Timestamptz(3)
   isFavorite         Boolean             @default(false)
   isBookmarked       Boolean             @default(false)
   inLibrary          Boolean             @default(false) // ephemeral quiz items stay out of the library until saved
   personalNotes      String?
   normalizedHash     String // dedupe key on normalised body
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
+  createdAt          DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime            @updatedAt @db.Timestamptz(3)
 
   tags         QuestionTag[]
   quizLinks    QuizQuestion[]
@@ -513,8 +528,8 @@ model Quiz {
   isSaved           Boolean          @default(false)
   revisionSessionId String?          @unique
   revisionSession   RevisionSession? @relation(fields: [revisionSessionId], references: [id], onDelete: SetNull)
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
+  createdAt         DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime         @updatedAt @db.Timestamptz(3)
 
   topics    QuizTopic[]
   questions QuizQuestion[]
@@ -551,8 +566,8 @@ model QuizAttempt {
   quiz           Quiz          @relation(fields: [quizId], references: [id], onDelete: Cascade)
   status         AttemptStatus @default(IN_PROGRESS)
   currentIndex   Int           @default(0)
-  startedAt      DateTime      @default(now())
-  submittedAt    DateTime?
+  startedAt      DateTime      @default(now()) @db.Timestamptz(3)
+  submittedAt    DateTime?     @db.Timestamptz(3)
   durationSecs   Int?
   correctCount   Int           @default(0)
   partialCount   Int           @default(0)
@@ -590,7 +605,7 @@ model AnswerSubmission {
   timeSpentSecs     Int?
   aiRequestId       String?
   gradeOverridden   Boolean        @default(false)
-  submittedAt       DateTime       @default(now())
+  submittedAt       DateTime       @default(now()) @db.Timestamptz(3)
 
   revisionReview RevisionReview?
 
@@ -615,12 +630,12 @@ model RevisionItem {
   repetitions    Int            @default(0) // consecutive correct reviews
   lapses         Int            @default(0)
   totalReviews   Int            @default(0)
-  lastReviewedAt DateTime?
-  nextReviewAt   DateTime
+  lastReviewedAt DateTime?      @db.Timestamptz(3)
+  nextReviewAt   DateTime       @db.Timestamptz(3)
   dueOverridden  Boolean        @default(false)
   reason         String // "incorrect" | "partial" | "red_mark" | "yellow_mark" | "manual"
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  createdAt      DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime       @updatedAt @db.Timestamptz(3)
 
   reviews RevisionReview[]
 
@@ -632,9 +647,9 @@ model RevisionSession {
   userId       String
   user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   kind         String // "weekly" | "spaced" | "custom"
-  scheduledFor DateTime // local revision day at 00:00 in user TZ, stored as UTC
-  completedAt  DateTime?
-  createdAt    DateTime  @default(now())
+  scheduledFor DateTime  @db.Timestamptz(3) // local revision day at 00:00 in user TZ, stored as UTC
+  completedAt  DateTime? @db.Timestamptz(3)
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
 
   quiz    Quiz?
   reviews RevisionReview[]
@@ -655,7 +670,7 @@ model RevisionReview {
   quality           Int // 0–5 SM-2 quality
   prevIntervalDays  Int
   newIntervalDays   Int
-  reviewedAt        DateTime          @default(now())
+  reviewedAt        DateTime          @default(now()) @db.Timestamptz(3)
 
   @@index([revisionItemId, reviewedAt])
 }
@@ -678,8 +693,8 @@ model PracticePaper {
   generationNotes String? // user's manual instructions to the AI
   aiProvider      AiProviderName?
   aiRequestId     String?
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  createdAt       DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime        @updatedAt @db.Timestamptz(3)
 
   topics    PaperTopic[]
   sections  PaperSection[]
@@ -747,9 +762,9 @@ model PaperAttempt {
   feedbackTiming  FeedbackTiming @default(END)
   status          AttemptStatus  @default(IN_PROGRESS)
   draftAnswers    Json? // autosaved progress { [paperQuestionId]: answer }
-  startedAt       DateTime       @default(now())
-  deadlineAt      DateTime? // exam mode timer
-  submittedAt     DateTime?
+  startedAt       DateTime       @default(now()) @db.Timestamptz(3)
+  deadlineAt      DateTime?      @db.Timestamptz(3) // exam mode timer
+  submittedAt     DateTime?      @db.Timestamptz(3)
   score           Float?
   maxScore        Float?
   feedbackSummary String?
@@ -777,44 +792,88 @@ model LearningGoal {
   targetDate    DateTime?  @db.Date
   estimatedMins Int?
   progressPct   Int        @default(0) // 0–100, derived or manual
-  completedAt   DateTime?
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  completedAt   DateTime?  @db.Timestamptz(3)
+  createdAt     DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime   @updatedAt @db.Timestamptz(3)
 
-  sessions LearningSession[]
-  events   CalendarEvent[] // LEARNING_DEADLINE events
+  sessions   LearningSession[]
+  events     CalendarEvent[] // LEARNING_DEADLINE events
+  milestones LearningMilestone[]
 
   @@index([userId, status, targetDate])
 }
 
 model LearningSession {
-  id                String        @id @default(cuid())
+  id                String             @id @default(cuid())
   userId            String
-  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   goalId            String?
-  goal              LearningGoal? @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  goal              LearningGoal?      @relation(fields: [goalId], references: [id], onDelete: SetNull)
   subjectId         String?
-  subject           Subject?      @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  subject           Subject?           @relation(fields: [subjectId], references: [id], onDelete: SetNull)
   topicId           String?
-  topic             Topic?        @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  topic             Topic?             @relation(fields: [topicId], references: [id], onDelete: SetNull)
   title             String
   notes             String?
-  startsAt          DateTime
+  startsAt          DateTime           @db.Timestamptz(3)
   plannedMins       Int
   actualMins        Int? // only set when the user records it
-  status            SessionStatus @default(SCHEDULED)
-  completedAt       DateTime?
+  status            SessionStatus      @default(SCHEDULED)
+  completedAt       DateTime?          @db.Timestamptz(3)
   rrule             String? // RFC 5545 recurrence on the series root
   seriesId          String? // root session id for generated occurrences
   rescheduledFromId String?
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  priority          Priority           @default(MEDIUM)
+  milestoneId       String?
+  milestone         LearningMilestone? @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
+  // Live timer: elapsedSecs accumulates across pauses; runningSince is set while running.
+  runningSince      DateTime?          @db.Timestamptz(3)
+  elapsedSecs       Int                @default(0)
+  createdAt         DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime           @updatedAt @db.Timestamptz(3)
 
-  reminders Reminder[]
+  reminders     Reminder[]
+  focusSessions FocusSession[]
 
   @@index([userId, startsAt])
   @@index([userId, status])
   @@index([seriesId])
+}
+
+/// A checkable step inside a goal. Goal progress is derived from these, never typed in.
+model LearningMilestone {
+  id          String       @id @default(cuid())
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goalId      String
+  goal        LearningGoal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  title       String
+  position    Int          @default(0)
+  completedAt DateTime?    @db.Timestamptz(3)
+  createdAt   DateTime     @default(now()) @db.Timestamptz(3)
+
+  sessions LearningSession[]
+
+  @@index([goalId, position])
+  @@index([userId])
+}
+
+/// A completed stretch of focused study (focus timer or a finished learning session).
+model FocusSession {
+  id           String           @id @default(cuid())
+  userId       String
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId    String?
+  session      LearningSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  subjectId    String?
+  subject      Subject?         @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  label        String?
+  startedAt    DateTime         @db.Timestamptz(3)
+  endedAt      DateTime         @db.Timestamptz(3)
+  durationSecs Int
+  createdAt    DateTime         @default(now()) @db.Timestamptz(3)
+
+  @@index([userId, endedAt])
 }
 
 // ───────────────────────────── Calendar ─────────────────────────────
@@ -831,13 +890,13 @@ model CalendarEvent {
   subject     Subject?      @relation(fields: [subjectId], references: [id], onDelete: SetNull)
   goalId      String?
   goal        LearningGoal? @relation(fields: [goalId], references: [id], onDelete: Cascade)
-  startsAt    DateTime
-  endsAt      DateTime?
+  startsAt    DateTime      @db.Timestamptz(3)
+  endsAt      DateTime?     @db.Timestamptz(3)
   allDay      Boolean       @default(false)
   rrule       String?
-  completedAt DateTime? // exam taken / event done
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  completedAt DateTime?     @db.Timestamptz(3) // exam taken / event done
+  createdAt   DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime      @updatedAt @db.Timestamptz(3)
 
   examination Examination?
   assignment  Assignment?
@@ -858,9 +917,10 @@ model Examination {
 model Assignment {
   eventId          String            @id // event.startsAt = due date
   event            CalendarEvent     @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  assignedAt       DateTime?
+  assignedAt       DateTime?         @db.Timestamptz(3)
   submissionStatus SubmissionStatus  @default(NOT_STARTED)
-  submittedAt      DateTime?
+  submittedAt      DateTime?         @db.Timestamptz(3)
+  priority         Priority          @default(MEDIUM)
   attachmentId     String?
   attachment       UploadedDocument? @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
 }
@@ -876,9 +936,9 @@ model Reminder {
   sessionId  String?
   session    LearningSession?      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   offsetMins Int // minutes before start
-  fireAt     DateTime
+  fireAt     DateTime              @db.Timestamptz(3)
   channels   NotificationChannel[]
-  sentAt     DateTime?
+  sentAt     DateTime?             @db.Timestamptz(3)
 
   @@index([fireAt, sentAt])
   @@index([userId])
@@ -893,9 +953,13 @@ model Notification {
   title     String
   body      String?
   link      String? // in-app route
-  readAt    DateTime?
-  createdAt DateTime            @default(now())
+  readAt    DateTime?           @db.Timestamptz(3)
+  // Identifies what the notification is about (e.g. "exam-24h:<eventId>") so the
+  // reminder sweep never creates the same notification twice.
+  dedupeKey String?
+  createdAt DateTime            @default(now()) @db.Timestamptz(3)
 
+  @@unique([userId, dedupeKey])
   @@index([userId, readAt, createdAt])
 }
 
@@ -915,7 +979,7 @@ model UploadedDocument {
   sha256           String
   extractionStatus ExtractionStatus @default(PENDING)
   extractedText    String?
-  createdAt        DateTime         @default(now())
+  createdAt        DateTime         @default(now()) @db.Timestamptz(3)
 
   snippets    CodeSnippet[]
   questions   Question[]
@@ -944,7 +1008,7 @@ model AiRequestLog {
   errorCode     String?
   retries       Int            @default(0)
   usedOwnKey    Boolean        @default(false)
-  createdAt     DateTime       @default(now())
+  createdAt     DateTime       @default(now()) @db.Timestamptz(3)
 
   @@index([userId, createdAt])
 }
@@ -959,7 +1023,7 @@ model ActivityLog {
   entityId   String?
   localDate  DateTime @db.Date // user's local calendar date, for streaks
   meta       Json?
-  createdAt  DateTime @default(now())
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
 
   @@index([userId, localDate])
   @@index([userId, kind, createdAt])
