@@ -1,20 +1,6 @@
 import { SimplePage } from "./SimplePage";
 
-/*
- * Interim pages. Each is replaced by its real feature module in a later phase:
- * auth → Phase 2b (with the auth API); legal → before public launch.
- */
-
-export function AuthPendingPage({ mode }: { mode: "signin" | "signup" }) {
-  return (
-    <SimplePage eyebrow="auth" title={mode === "signup" ? "Create your account" : "Sign in"}>
-      <p>
-        Accounts are the next milestone. Sign-up, sign-in and password reset are being built together with the secure
-        session API, so this page will work as soon as your data can be stored safely.
-      </p>
-    </SimplePage>
-  );
-}
+/* Legal pages are drafts until public launch. */
 
 export function PrivacyPage() {
   return (

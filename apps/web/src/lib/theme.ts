@@ -1,33 +1,49 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 
 export type Theme = "light" | "dark" | "system";
 const KEY = "cj-theme";
 const media = () => window.matchMedia("(prefers-color-scheme: dark)");
 
-function apply(theme: Theme) {
-  const dark = theme === "dark" || (theme === "system" && media().matches);
+/*
+ * One shared store, so every component using useTheme (e.g. the desktop and mobile
+ * toggles on the same page) sees the same value. Synced with UserPreferences.theme in Phase 3.
+ */
+const listeners = new Set<() => void>();
+const read = (): Theme => (localStorage.getItem(KEY) as Theme | null) ?? "system";
+
+function apply() {
+  const t = read();
+  const dark = t === "dark" || (t === "system" && media().matches);
   document.documentElement.classList.toggle("dark", dark);
 }
 
-/** Theme preference persisted locally; synced with UserPreferences.theme once signed in (Phase 3). */
-export function useTheme() {
-  const [theme, setThemeState] = useState<Theme>(() => (localStorage.getItem(KEY) as Theme | null) ?? "system");
-  const [systemDark, setSystemDark] = useState(() => media().matches);
+function subscribe(cb: () => void) {
+  listeners.add(cb);
+  const mq = media();
+  const onSystem = () => {
+    apply();
+    cb();
+  };
+  const onStorage = (e: StorageEvent) => {
+    if (e.key === KEY) onSystem(); // another tab changed it
+  };
+  mq.addEventListener("change", onSystem);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    listeners.delete(cb);
+    mq.removeEventListener("change", onSystem);
+    window.removeEventListener("storage", onStorage);
+  };
+}
 
-  useEffect(() => {
-    apply(theme);
-    const mq = media();
-    const onChange = () => {
-      setSystemDark(mq.matches);
-      if (theme === "system") apply("system");
-    };
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, [theme]);
+export function useTheme() {
+  const theme = useSyncExternalStore(subscribe, read);
+  const systemDark = useSyncExternalStore(subscribe, () => media().matches);
 
   const setTheme = useCallback((t: Theme) => {
     localStorage.setItem(KEY, t);
-    setThemeState(t);
+    apply();
+    listeners.forEach((l) => l());
   }, []);
 
   const isDark = theme === "dark" || (theme === "system" && systemDark);
