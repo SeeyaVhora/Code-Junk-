@@ -1,0 +1,14 @@
+{
+  "name": "code-junk",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev:web": "npm run dev -w @code-junk/web",
+    "build:web": "npm run build -w @code-junk/web",
+    "db:up": "docker compose up -d postgres",
+    "db:validate": "npm run prisma:validate -w @code-junk/api",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": { "node": ">=22" }
+}
