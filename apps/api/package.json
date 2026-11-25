@@ -1,0 +1,14 @@
+{
+  "name": "@code-junk/api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "prisma:validate": "prisma validate",
+    "prisma:format": "prisma format",
+    "prisma:migrate": "prisma migrate dev"
+  },
+  "devDependencies": {
+    "prisma": "7.10.1"
+  }
+}

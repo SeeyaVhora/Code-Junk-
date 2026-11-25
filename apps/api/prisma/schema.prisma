@@ -1,0 +1,966 @@
+// Code Junk — database schema
+// Conventions:
+//  * Every user-owned row carries `userId` (indexed, cascade-deleted with the user).
+//  * Timestamps are UTC (timestamptz). User-local logic uses UserPreferences.timeZone.
+//  * History tables (attempts, submissions, reviews) are append-only.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum Difficulty {
+  BEGINNER
+  EASY
+  INTERMEDIATE
+  ADVANCED
+  EXPERT
+}
+
+enum QuestionType {
+  CONCEPTUAL
+  THEORY
+  SHORT_ANSWER
+  MCQ
+  OUTPUT_PREDICTION
+  DEBUGGING
+  SHORT_CODE
+  LONG_CODE
+  PSEUDOCODE
+  PROBLEM_SOLVING
+}
+
+enum QuestionSource {
+  AI_GENERATED
+  MANUAL
+  SAMPLE_PAPER
+  EXTERNAL_PLATFORM // LeetCode, Codeforces, CodeChef… (URL + attribution only)
+  IMPORTED_DOCUMENT
+}
+
+enum ColorMark {
+  GREEN // understood
+  YELLOW // needs revision
+  RED // important / weak
+}
+
+enum Verdict {
+  CORRECT
+  PARTIAL
+  INCORRECT
+  UNGRADED
+}
+
+enum GradingMethod {
+  DETERMINISTIC
+  AI_RUBRIC
+  TEST_CASES
+  SELF_ASSESSED
+}
+
+enum QuizMode {
+  SHORT
+  LONG
+  REVISION
+}
+
+enum AttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+  GRADED
+  ABANDONED
+}
+
+enum PaperMode {
+  EXAM
+  GUIDED
+}
+
+enum FeedbackTiming {
+  IMMEDIATE
+  END
+}
+
+enum AiProviderName {
+  OPENAI
+  GEMINI
+}
+
+enum RevisionStatus {
+  LEARNING
+  REVIEWING
+  MASTERED
+  SUSPENDED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum GoalStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+enum SessionStatus {
+  SCHEDULED
+  COMPLETED
+  SKIPPED
+  RESCHEDULED
+}
+
+enum EventCategory {
+  EXAMINATION
+  ASSIGNMENT
+  COLLEGE_EVENT
+  LEARNING_DEADLINE
+  PERSONAL
+}
+
+enum PreparationStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  READY
+}
+
+enum SubmissionStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  SUBMITTED
+  GRADED
+  LATE
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  PUSH
+}
+
+enum DocumentKind {
+  SYLLABUS
+  SAMPLE_PAPER
+  PREVIOUS_YEAR_PAPER
+  REFERENCE
+  ASSIGNMENT_ATTACHMENT
+  CODE_FILE
+  AVATAR
+  OTHER
+}
+
+enum ExtractionStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+  NOT_APPLICABLE
+}
+
+enum ThemePreference {
+  SYSTEM
+  LIGHT
+  DARK
+}
+
+// ───────────────────────────── Identity ─────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique // stored lower-cased
+  passwordHash  String // argon2id
+  name          String
+  avatarUrl     String?
+  emailVerified DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  preferences   UserPreferences?
+  sessions      Session[]
+  resetTokens   PasswordResetToken[]
+  aiCredentials AiCredential[]
+  subjects      Subject[]
+  topics        Topic[]
+  tags          Tag[]
+  collections   CodeCollection[]
+  snippets      CodeSnippet[]
+  questions     Question[]
+  qCollections  QuestionCollection[]
+  quizzes       Quiz[]
+  quizAttempts  QuizAttempt[]
+  submissions   AnswerSubmission[]
+  revisionItems RevisionItem[]
+  revisionSess  RevisionSession[]
+  papers        PracticePaper[]
+  paperAttempts PaperAttempt[]
+  goals         LearningGoal[]
+  learningSess  LearningSession[]
+  events        CalendarEvent[]
+  notifications Notification[]
+  reminders     Reminder[]
+  documents     UploadedDocument[]
+  aiLogs        AiRequestLog[]
+  activity      ActivityLog[]
+}
+
+model UserPreferences {
+  userId              String          @id
+  user                User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  timeZone            String          @default("UTC") // IANA zone
+  theme               ThemePreference @default(SYSTEM)
+  preferredLanguages  String[] // e.g. ["go","python"]
+  defaultLanguage     String?
+  learningGoalsText   String?
+  dailyStudyMinutes   Int             @default(60)
+  preferredStudyTimes String[] // e.g. ["morning","evening"]
+  aiProvider          AiProviderName  @default(OPENAI)
+  revisionDay         Int             @default(0) // 0 = Sunday … 6 = Saturday
+  revisionSessionSize Int             @default(20)
+  weekStartsOn        Int             @default(1) // calendar: 1 = Monday
+  notifyInApp         Boolean         @default(true)
+  notifyEmail         Boolean         @default(false)
+  notifyPush          Boolean         @default(false)
+  defaultReminderMins Int             @default(30)
+  updatedAt           DateTime        @updatedAt
+}
+
+model Session {
+  id         String   @id // SHA-256 of the opaque cookie token; raw token never stored
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  csrfSecret String
+  userAgent  String?
+  ipHash     String?
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  expiresAt  DateTime
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+/// Bring-your-own-key. `encryptedKey` is AES-256-GCM (iv:tag:ciphertext); never sent to the client.
+model AiCredential {
+  id           String         @id @default(cuid())
+  userId       String
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider     AiProviderName
+  encryptedKey String
+  keyLast4     String
+  model        String? // optional model override
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@unique([userId, provider])
+}
+
+// ───────────────────────────── Taxonomy ─────────────────────────────
+
+model Subject {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  slug        String
+  description String?
+  color       String? // token name, e.g. "teal"
+  icon        String? // lucide icon name
+  isCoding    Boolean   @default(true) // false hides language pickers (e.g. Mathematics)
+  defaultLang String?
+  archivedAt  DateTime?
+  position    Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  topics      Topic[]
+  collections CodeCollection[]
+  snippets    CodeSnippet[]
+  questions   Question[]
+  quizzes     Quiz[]
+  papers      PracticePaper[]
+  goals       LearningGoal[]
+  sessions    LearningSession[]
+  events      CalendarEvent[]
+  documents   UploadedDocument[]
+
+  @@unique([userId, slug])
+  @@index([userId, position])
+}
+
+model Topic {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectId String
+  subject   Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  parentId  String? // subtopics
+  parent    Topic?   @relation("TopicTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Topic[]  @relation("TopicTree")
+  name      String
+  slug      String
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  snippets    CodeSnippet[]
+  questions   Question[]        @relation("QuestionTopic")
+  subtopicQs  Question[]        @relation("QuestionSubtopic")
+  goals       LearningGoal[]
+  sessions    LearningSession[]
+  quizTopics  QuizTopic[]
+  paperTopics PaperTopic[]
+
+  @@unique([subjectId, parentId, slug])
+  @@index([userId])
+  @@index([subjectId, position])
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  color     String?
+  createdAt DateTime @default(now())
+
+  snippets  SnippetTag[]
+  questions QuestionTag[]
+
+  @@unique([userId, name])
+}
+
+// ───────────────────────────── Code Booklet ─────────────────────────────
+
+model CodeCollection {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectId   String
+  subject     Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  snippets CodeSnippet[]
+
+  @@index([userId, subjectId])
+}
+
+model CodeSnippet {
+  id           String            @id @default(cuid())
+  userId       String
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectId    String
+  subject      Subject           @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  topicId      String?
+  topic        Topic?            @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  collectionId String?
+  collection   CodeCollection?   @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  title        String
+  description  String?
+  language     String // CodeMirror language id
+  code         String
+  notes        String? // markdown, sanitised on render
+  isFavorite   Boolean           @default(false)
+  position     Int               @default(0) // booklet page order
+  sourceFileId String?
+  sourceFile   UploadedDocument? @relation(fields: [sourceFileId], references: [id], onDelete: SetNull)
+  lastOpenedAt DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  tags SnippetTag[]
+
+  @@index([userId, subjectId, position])
+  @@index([userId, updatedAt])
+  @@index([userId, isFavorite])
+  @@index([userId, language])
+}
+
+model SnippetTag {
+  snippetId String
+  snippet   CodeSnippet @relation(fields: [snippetId], references: [id], onDelete: Cascade)
+  tagId     String
+  tag       Tag         @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([snippetId, tagId])
+  @@index([tagId])
+}
+
+// ───────────────────────────── Questions & Library ─────────────────────────────
+
+model QuestionCollection {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  questions Question[]
+
+  @@unique([userId, name])
+}
+
+/// The canonical question. Quizzes, papers, library and revision all reference it.
+model Question {
+  id                 String              @id @default(cuid())
+  userId             String
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectId          String
+  subject            Subject             @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  topicId            String?
+  topic              Topic?              @relation("QuestionTopic", fields: [topicId], references: [id], onDelete: SetNull)
+  subtopicId         String?
+  subtopic           Topic?              @relation("QuestionSubtopic", fields: [subtopicId], references: [id], onDelete: SetNull)
+  collectionId       String?
+  collection         QuestionCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  language           String?
+  difficulty         Difficulty
+  type               QuestionType
+  title              String
+  body               String // markdown (may contain code fences)
+  starterCode        String?
+  options            Json? // MCQ: [{ id, text }]
+  correctOptionIds   String[] // MCQ answer key
+  expectedAnswer     String? // reference answer / expected output
+  solution           String? // full worked solution
+  explanation        String?
+  evaluationCriteria Json? // rubric: [{ criterion, weight }]
+  testCases          Json? // [{ input, expectedOutput, hidden }]
+  concepts           String[]
+  defaultMarks       Int?
+  source             QuestionSource
+  sourceUrl          String? // external platform link
+  sourceAttribution  String?
+  sourceDocumentId   String?
+  sourceDocument     UploadedDocument?   @relation(fields: [sourceDocumentId], references: [id], onDelete: SetNull)
+  aiRequestId        String? // provenance for AI-generated questions
+  colorMark          ColorMark?
+  colorMarkedAt      DateTime?
+  isFavorite         Boolean             @default(false)
+  isBookmarked       Boolean             @default(false)
+  inLibrary          Boolean             @default(false) // ephemeral quiz items stay out of the library until saved
+  personalNotes      String?
+  normalizedHash     String // dedupe key on normalised body
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  tags         QuestionTag[]
+  quizLinks    QuizQuestion[]
+  paperLinks   PaperQuestion[]
+  submissions  AnswerSubmission[]
+  revisionItem RevisionItem?
+
+  @@index([userId, inLibrary, createdAt])
+  @@index([userId, subjectId, topicId])
+  @@index([userId, colorMark])
+  @@index([userId, difficulty])
+  @@index([userId, type])
+  @@index([userId, normalizedHash])
+}
+
+model QuestionTag {
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  tagId      String
+  tag        Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([questionId, tagId])
+  @@index([tagId])
+}
+
+// ───────────────────────────── Quizzes ─────────────────────────────
+
+model Quiz {
+  id                String           @id @default(cuid())
+  userId            String
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectId         String
+  subject           Subject          @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  title             String
+  mode              QuizMode
+  language          String?
+  difficulty        Difficulty? // null = mixed
+  questionTypes     QuestionType[]
+  requestedCount    Int
+  aiProvider        AiProviderName?
+  aiRequestId       String?
+  isSaved           Boolean          @default(false)
+  revisionSessionId String?          @unique
+  revisionSession   RevisionSession? @relation(fields: [revisionSessionId], references: [id], onDelete: SetNull)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  topics    QuizTopic[]
+  questions QuizQuestion[]
+  attempts  QuizAttempt[]
+
+  @@index([userId, createdAt])
+}
+
+model QuizTopic {
+  quizId  String
+  quiz    Quiz   @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  topicId String
+  topic   Topic  @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@id([quizId, topicId])
+}
+
+model QuizQuestion {
+  quizId     String
+  quiz       Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  position   Int
+
+  @@id([quizId, questionId])
+  @@unique([quizId, position])
+}
+
+model QuizAttempt {
+  id             String        @id @default(cuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quizId         String
+  quiz           Quiz          @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  status         AttemptStatus @default(IN_PROGRESS)
+  currentIndex   Int           @default(0)
+  startedAt      DateTime      @default(now())
+  submittedAt    DateTime?
+  durationSecs   Int?
+  correctCount   Int           @default(0)
+  partialCount   Int           @default(0)
+  incorrectCount Int           @default(0)
+  score          Float?
+  maxScore       Float?
+
+  submissions AnswerSubmission[]
+
+  @@index([userId, startedAt])
+  @@index([quizId])
+}
+
+/// One answer to one question in one attempt (quiz, paper or revision). Append-only.
+model AnswerSubmission {
+  id                String         @id @default(cuid())
+  userId            String
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questionId        String
+  question          Question       @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  quizAttemptId     String?
+  quizAttempt       QuizAttempt?   @relation(fields: [quizAttemptId], references: [id], onDelete: Cascade)
+  paperAttemptId    String?
+  paperAttempt      PaperAttempt?  @relation(fields: [paperAttemptId], references: [id], onDelete: Cascade)
+  answerText        String?
+  selectedOptionIds String[]
+  verdict           Verdict        @default(UNGRADED)
+  gradingMethod     GradingMethod?
+  score             Float?
+  maxScore          Float?
+  feedback          String?
+  mistakes          Json? // [{ location, description }]
+  criteriaResults   Json? // rubric outcomes
+  suggestedMark     ColorMark?
+  timeSpentSecs     Int?
+  aiRequestId       String?
+  gradeOverridden   Boolean        @default(false)
+  submittedAt       DateTime       @default(now())
+
+  revisionReview RevisionReview?
+
+  @@index([userId, submittedAt])
+  @@index([userId, questionId, submittedAt])
+  @@index([quizAttemptId])
+  @@index([paperAttemptId])
+}
+
+// ───────────────────────────── Revision ─────────────────────────────
+
+/// Spaced-repetition state, one per (user, question). Never deleted on success.
+model RevisionItem {
+  id             String         @id @default(cuid())
+  userId         String
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questionId     String         @unique
+  question       Question       @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  status         RevisionStatus @default(LEARNING)
+  ease           Float          @default(2.5)
+  intervalDays   Int            @default(0)
+  repetitions    Int            @default(0) // consecutive correct reviews
+  lapses         Int            @default(0)
+  totalReviews   Int            @default(0)
+  lastReviewedAt DateTime?
+  nextReviewAt   DateTime
+  dueOverridden  Boolean        @default(false)
+  reason         String // "incorrect" | "partial" | "red_mark" | "yellow_mark" | "manual"
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  reviews RevisionReview[]
+
+  @@index([userId, status, nextReviewAt])
+}
+
+model RevisionSession {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind         String // "weekly" | "spaced" | "custom"
+  scheduledFor DateTime // local revision day at 00:00 in user TZ, stored as UTC
+  completedAt  DateTime?
+  createdAt    DateTime  @default(now())
+
+  quiz    Quiz?
+  reviews RevisionReview[]
+
+  @@unique([userId, kind, scheduledFor])
+  @@index([userId, scheduledFor])
+}
+
+model RevisionReview {
+  id                String            @id @default(cuid())
+  revisionItemId    String
+  revisionItem      RevisionItem      @relation(fields: [revisionItemId], references: [id], onDelete: Cascade)
+  revisionSessionId String?
+  revisionSession   RevisionSession?  @relation(fields: [revisionSessionId], references: [id], onDelete: SetNull)
+  submissionId      String?           @unique
+  submission        AnswerSubmission? @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+  verdict           Verdict
+  quality           Int // 0–5 SM-2 quality
+  prevIntervalDays  Int
+  newIntervalDays   Int
+  reviewedAt        DateTime          @default(now())
+
+  @@index([revisionItemId, reviewedAt])
+}
+
+// ───────────────────────────── Practice papers ─────────────────────────────
+
+model PracticePaper {
+  id              String          @id @default(cuid())
+  userId          String
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectId       String
+  subject         Subject         @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  title           String
+  instructions    String?
+  language        String?
+  difficulty      Difficulty?
+  totalMarks      Int
+  durationMins    Int
+  distribution    Json // requested config: { theory: 40, coding: 60, sections: [...] }
+  generationNotes String? // user's manual instructions to the AI
+  aiProvider      AiProviderName?
+  aiRequestId     String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  topics    PaperTopic[]
+  sections  PaperSection[]
+  questions PaperQuestion[]
+  attempts  PaperAttempt[]
+  materials PaperMaterial[]
+
+  @@index([userId, createdAt])
+}
+
+model PaperTopic {
+  paperId String
+  paper   PracticePaper @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  topicId String
+  topic   Topic         @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@id([paperId, topicId])
+}
+
+model PaperMaterial {
+  paperId    String
+  paper      PracticePaper    @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  documentId String
+  document   UploadedDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@id([paperId, documentId])
+}
+
+model PaperSection {
+  id           String        @id @default(cuid())
+  paperId      String
+  paper        PracticePaper @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  title        String // "Section A — Short answers"
+  instructions String?
+  position     Int
+
+  questions PaperQuestion[]
+
+  @@unique([paperId, position])
+}
+
+model PaperQuestion {
+  id         String        @id @default(cuid())
+  paperId    String
+  paper      PracticePaper @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  sectionId  String?
+  section    PaperSection? @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  questionId String
+  question   Question      @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  position   Int
+  marks      Int
+  isOptional Boolean       @default(false)
+
+  @@unique([paperId, position])
+  @@index([questionId])
+}
+
+model PaperAttempt {
+  id              String         @id @default(cuid())
+  userId          String
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  paperId         String
+  paper           PracticePaper  @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  mode            PaperMode
+  feedbackTiming  FeedbackTiming @default(END)
+  status          AttemptStatus  @default(IN_PROGRESS)
+  draftAnswers    Json? // autosaved progress { [paperQuestionId]: answer }
+  startedAt       DateTime       @default(now())
+  deadlineAt      DateTime? // exam mode timer
+  submittedAt     DateTime?
+  score           Float?
+  maxScore        Float?
+  feedbackSummary String?
+
+  submissions AnswerSubmission[]
+
+  @@index([userId, startedAt])
+  @@index([paperId])
+}
+
+// ───────────────────────────── Planner ─────────────────────────────
+
+model LearningGoal {
+  id            String     @id @default(cuid())
+  userId        String
+  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectId     String?
+  subject       Subject?   @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  topicId       String?
+  topic         Topic?     @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  title         String
+  description   String?
+  priority      Priority   @default(MEDIUM)
+  status        GoalStatus @default(NOT_STARTED)
+  targetDate    DateTime?  @db.Date
+  estimatedMins Int?
+  progressPct   Int        @default(0) // 0–100, derived or manual
+  completedAt   DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  sessions LearningSession[]
+  events   CalendarEvent[] // LEARNING_DEADLINE events
+
+  @@index([userId, status, targetDate])
+}
+
+model LearningSession {
+  id                String        @id @default(cuid())
+  userId            String
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goalId            String?
+  goal              LearningGoal? @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  subjectId         String?
+  subject           Subject?      @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  topicId           String?
+  topic             Topic?        @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  title             String
+  notes             String?
+  startsAt          DateTime
+  plannedMins       Int
+  actualMins        Int? // only set when the user records it
+  status            SessionStatus @default(SCHEDULED)
+  completedAt       DateTime?
+  rrule             String? // RFC 5545 recurrence on the series root
+  seriesId          String? // root session id for generated occurrences
+  rescheduledFromId String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  reminders Reminder[]
+
+  @@index([userId, startsAt])
+  @@index([userId, status])
+  @@index([seriesId])
+}
+
+// ───────────────────────────── Calendar ─────────────────────────────
+
+model CalendarEvent {
+  id          String        @id @default(cuid())
+  userId      String
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category    EventCategory
+  title       String
+  description String?
+  location    String?
+  subjectId   String?
+  subject     Subject?      @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  goalId      String?
+  goal        LearningGoal? @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  startsAt    DateTime
+  endsAt      DateTime?
+  allDay      Boolean       @default(false)
+  rrule       String?
+  completedAt DateTime? // exam taken / event done
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  examination Examination?
+  assignment  Assignment?
+  reminders   Reminder[]
+
+  @@index([userId, startsAt])
+  @@index([userId, category, startsAt])
+}
+
+model Examination {
+  eventId           String            @id
+  event             CalendarEvent     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  venue             String?
+  syllabus          String?
+  preparationStatus PreparationStatus @default(NOT_STARTED)
+}
+
+model Assignment {
+  eventId          String            @id // event.startsAt = due date
+  event            CalendarEvent     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  assignedAt       DateTime?
+  submissionStatus SubmissionStatus  @default(NOT_STARTED)
+  submittedAt      DateTime?
+  attachmentId     String?
+  attachment       UploadedDocument? @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
+}
+
+// ───────────────────────────── Notifications ─────────────────────────────
+
+model Reminder {
+  id         String                @id @default(cuid())
+  userId     String
+  user       User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eventId    String?
+  event      CalendarEvent?        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  sessionId  String?
+  session    LearningSession?      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  offsetMins Int // minutes before start
+  fireAt     DateTime
+  channels   NotificationChannel[]
+  sentAt     DateTime?
+
+  @@index([fireAt, sentAt])
+  @@index([userId])
+}
+
+model Notification {
+  id        String              @id @default(cuid())
+  userId    String
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel   NotificationChannel @default(IN_APP)
+  kind      String // "reminder" | "revision_ready" | "paper_generated" | …
+  title     String
+  body      String?
+  link      String? // in-app route
+  readAt    DateTime?
+  createdAt DateTime            @default(now())
+
+  @@index([userId, readAt, createdAt])
+}
+
+// ───────────────────────────── Files ─────────────────────────────
+
+model UploadedDocument {
+  id               String           @id @default(cuid())
+  userId           String
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectId        String?
+  subject          Subject?         @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  kind             DocumentKind
+  originalName     String
+  mimeType         String
+  sizeBytes        Int
+  storageKey       String           @unique // opaque key; never a user-supplied path
+  sha256           String
+  extractionStatus ExtractionStatus @default(PENDING)
+  extractedText    String?
+  createdAt        DateTime         @default(now())
+
+  snippets    CodeSnippet[]
+  questions   Question[]
+  papers      PaperMaterial[]
+  assignments Assignment[]
+
+  @@index([userId, kind])
+}
+
+// ───────────────────────────── Telemetry ─────────────────────────────
+
+/// AI usage and cost tracking. Never stores prompts' user content or keys.
+model AiRequestLog {
+  id            String         @id @default(cuid())
+  userId        String
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider      AiProviderName
+  model         String
+  purpose       String // "generate_quiz" | "evaluate_answer" | "generate_paper" | "analyse_material"
+  promptVersion String
+  inputTokens   Int?
+  outputTokens  Int?
+  costMicroUsd  Int? // estimated
+  latencyMs     Int?
+  success       Boolean
+  errorCode     String?
+  retries       Int            @default(0)
+  usedOwnKey    Boolean        @default(false)
+  createdAt     DateTime       @default(now())
+
+  @@index([userId, createdAt])
+}
+
+/// Lightweight activity stream: streaks, "recently opened", weekly consistency.
+model ActivityLog {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind       String // "snippet.opened" | "quiz.completed" | "session.completed" | …
+  entityType String?
+  entityId   String?
+  localDate  DateTime @db.Date // user's local calendar date, for streaks
+  meta       Json?
+  createdAt  DateTime @default(now())
+
+  @@index([userId, localDate])
+  @@index([userId, kind, createdAt])
+}
