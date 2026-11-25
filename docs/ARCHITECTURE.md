@@ -12,7 +12,7 @@ This document records the architectural decisions for Code Junk. Update it whene
 |---|---|
 | Existing code | None. Empty directory, greenfield. |
 | Git | Not initialised → initialised on `main` as part of Phase 1. |
-| Toolchain | Node 24, npm 11, Docker 29. No local PostgreSQL → run Postgres via Docker Compose. |
+| Toolchain | Node 24, npm 11, Docker 29. A native PostgreSQL 17 service already uses port 5432, so the project's Docker Postgres is mapped to **5433**; another local app uses 4000, so the API defaults to **4100**. |
 | Conventions | None yet. Established below. |
 
 ---
@@ -30,21 +30,31 @@ This document records the architectural decisions for Code Junk. Update it whene
 | Server state | **TanStack Query** | Caching, loading/error states, optimistic updates (marking questions, completing tasks). |
 | Forms | React Hook Form + Zod resolver | Same Zod schemas validate on client and server. |
 | Charts | Recharts | Declarative, enough for weekly/monthly charts. |
-| Calendar | **FullCalendar** (month/week/day/list views, drag & drop) | Building four calendar views with DnD and time zones by hand is a large, error-prone job. |
+| Calendar | **Own month/week/day/agenda views** with native drag-and-drop between days | *Changed from FullCalendar:* the views needed are simple and consistent with the design system; avoids a large dependency whose v7 API was unproven here. |
 | Backend | **Node + Express 5 + TypeScript** | Requested. Express 5 handles async errors natively. |
 | Database | **PostgreSQL 16 + Prisma 7 (stable)** | Relational data with many joins; Prisma gives typed queries. Pin 7.x — 8.x is still RC. |
-| Auth | **Server-side sessions in Postgres**, `httpOnly; Secure; SameSite=Lax` cookie, **Argon2id** password hashing | Revocable sessions (sign-out-everywhere, account deletion) with no JWTs in localStorage, so XSS cannot steal tokens. CSRF: SameSite plus a double-submit token header on mutating requests. |
+| Auth | **Server-side sessions in Postgres** (token stored as an HMAC), `httpOnly; Secure; SameSite=Lax` cookie (`__Host-` prefixed in production), **Argon2id** via Node's built-in `crypto.argon2` (PHC strings) | Revocable sessions (sign-out-everywhere, account deletion) with no JWTs in localStorage, so XSS cannot steal tokens. CSRF: SameSite plus a double-submit token header on mutating requests. |
 | Validation | Zod 4 everywhere: request bodies, query params, env vars, **AI outputs** | One schema language. |
 | AI | Provider abstraction (`AiProvider` interface) with **OpenAI** and **Gemini** adapters using native structured-output / JSON-schema modes | Switch providers per user without touching feature code. |
 | User API keys | Optional bring-your-own-key, **encrypted at rest (AES-256-GCM)**, never returned to the client (only last 4 chars) | Spec requires "AI API configuration" in settings. Falls back to the server key. |
 | File storage | `StorageAdapter` interface: **local disk in dev**, S3-compatible (R2/S3/MinIO) in prod | No cloud dependency for local development. |
-| Document extraction | `pdf-parse` (PDF), `mammoth` (DOCX), plain text | Syllabus and sample-paper ingestion. |
-| PDF export | **Server-side `@react-pdf/renderer`** | Deterministic layout for papers/answer keys; no headless browser in prod. |
-| Background jobs | **pg-boss** (Postgres-backed queue) | Reminders, weekly revision generation, long AI jobs. No Redis needed. |
+| Document extraction | **unpdf** (PDF) and plain text; file type detected from bytes, not the browser's MIME type | Syllabus and sample-paper ingestion. |
+| PDF export | *Changed:* **pdfkit** on the server (`lib/pdf.ts`) | Small, no React on the server, deterministic output for booklets, papers, answer keys and solved papers. |
+| Background jobs | *Changed:* an **in-process reminder sweep** (every minute) plus per-user derived notifications refreshed on dashboard/notification loads; dedupe keys make both idempotent | Enough for one API instance; move to pg-boss when running several instances. |
 | Code execution | **Deferred**, behind a `CodeRunner` interface (Judge0 or a gVisor/Firecracker sandbox) | Never run user code on the API host. Until then coding answers use AI rubric evaluation, labelled as such. |
 | Logging | pino + request IDs; redact `authorization`, `cookie`, API keys, prompts' user content | Spec: logging without leaking sensitive data. |
-| Rate limiting | `express-rate-limit` (Postgres store): strict on `/api/auth/*` and `/api/ai/*` | Brute force and AI cost protection. |
+| Rate limiting | `express-rate-limit`, in-memory store: separate budgets per auth action (failed sign-ins only), per-user hourly limits on AI generation and evaluation | Swap in a shared store before running more than one API instance. |
 | Testing | Vitest (unit), Supertest (API), Playwright (E2E critical flows) | |
+
+### Decisions made during implementation
+
+- **Password hashing.** `@node-rs/argon2` and `argon2` both crashed the process intermittently on Windows (0xC0000409) under load in tests, so hashing moved to Node's built-in Argon2. The same crash was later reproduced with the built-in too, in a minimal Express + supertest script, so its root cause is still open (see §11, item 9).
+- **Recurring sessions** are stored as individual dated sessions linked by `seriesId` (not an RRULE expanded at read time), so each occurrence can be completed, rescheduled or deleted on its own, at the same local wall-clock time across DST.
+- **AI output** uses each provider's JSON mode plus Zod validation and one repair retry (rather than strict JSON-schema mode, which rejects optional fields). Generated questions are additionally checked (MCQ keys must match options, duplicates dropped) before anything is saved.
+- **Without an AI provider**, objective questions are still graded deterministically and subjective answers fall back to an honest self-assessment against the reference answer.
+- **Tests** use a deterministic fake provider that can only be installed when `NODE_ENV=test`.
+- **Goal progress** is derived from milestones (or linked sessions), never typed in.
+- **Analytics** never judge a topic on fewer than 5 graded answers.
 
 ### Time zones
 All timestamps are stored as UTC `timestamptz`. The user's IANA time zone lives in `UserPreferences.timeZone`. "Today", streaks, the Sunday revision and reminders are computed in the user's zone (via `date-fns-tz`). All-day events store a plain `date`.
@@ -204,6 +214,13 @@ Status codes: 200/201/204, 400 (validation), 401, 403 (never leak existence: oth
 
 | Phase | Scope | Exit criteria |
 |---|---|---|
+| Phase | Scope | Status |
+|---|---|---|
+| 1 Planning · 2 Foundation & auth · 3 App shell & dashboard · 4 Booklet & library · 5 AI practice · 6 Revision & papers · 7 Planner & calendar · 8 Analytics & notifications · 9 Settings | All modules implemented end to end | ✅ API: 45 integration/unit tests. Web: full-app browser run (desktop + mobile) |
+| Next | Real-provider smoke test with an API key; E2E suite in CI; S3 storage adapter; email/push channels; resolve the Windows native crash (§11) | ⏳ |
+
+Original plan:
+
 | **1** Planning | This doc, Prisma schema, monorepo scaffold, git | Schema validates. Plan reviewed. |
 | **2** Foundation | Design tokens, UI kit, landing page, auth pages (UI) + **auth API**, Docker Postgres | User can sign up/in/out, reset password; landing responsive. |
 | **3** App shell | AppShell, hamburger nav (nested, mobile), dashboard skeleton wired to real endpoints, profile & preferences | Dashboard shows real (empty-state) data. |
@@ -225,4 +242,5 @@ Status codes: 200/201/204, 400 (validation), 401, 403 (never leak existence: oth
 5. **Time zones and recurrence.** Use RRULE strings (`rrule` lib) and compute in the user's zone. Test DST transitions.
 6. **Scope.** 9 modules is a lot. Each phase ships working vertical slices rather than half-built screens everywhere.
 7. **Misleading analytics.** Minimum sample sizes (e.g. ≥5 attempts before a topic is labelled "weak"). Explicit "not enough data yet" states.
+9. **Open: intermittent native crash on Windows.** A Node process running Express + supertest with Argon2 hashing occasionally exits with 0xC0000409, about 1 run in 6–10 (reproduced without any project code beyond hashing). It hasn't been confirmed whether a long-running server is affected. Re-run the API test suite if a run dies with this code.
 8. **Copyright.** External platform questions store URL + attribution + the user's own notes. No scraping. Practice papers are clearly marked as original.
