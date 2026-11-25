@@ -1,0 +1,248 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+/*
+ * Code Junk design tokens.
+ * Semantic CSS variables are defined per theme (:root = light, .dark = dark)
+ * and mapped into Tailwind via @theme inline, so utilities like `bg-surface`
+ * and `text-muted` switch automatically with the theme.
+ */
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  /* Neutrals — warm "paper & ink" */
+  --paper: #fbfaf7; /* app background */
+  --surface: #ffffff; /* cards, inputs */
+  --surface-2: #f4f2ed; /* subtle fills, hover */
+  --surface-3: #ebe8e1; /* pressed, tracks */
+  --line: #e4e0d8; /* borders */
+  --line-strong: #d3cec4;
+  --ink: #17161a; /* primary text, primary buttons */
+  --ink-2: #45434b; /* secondary text */
+  --muted: #74717a; /* tertiary text, placeholders */
+  --on-ink: #fbfaf7;
+
+  /* Accent — fountain-pen blue */
+  --accent: #3049d8;
+  --accent-hover: #263cb8;
+  --accent-soft: #eaedfc;
+  --accent-ink: #1f2f8c;
+
+  /* Colour marks — reserved for GREEN / YELLOW / RED question marking */
+  --mark-green: #1f8a4c;
+  --mark-green-soft: #e3f4e9;
+  --mark-yellow: #b7791f;
+  --mark-yellow-soft: #fbf1dc;
+  --mark-red: #c8372d;
+  --mark-red-soft: #fbe6e3;
+
+  /* Calendar categories */
+  --cat-exam: #c8372d;
+  --cat-assignment: #3049d8;
+  --cat-college: #7a4fd1;
+  --cat-deadline: #b7791f;
+  --cat-personal: #5c6470;
+
+  /* Feedback */
+  --danger: #c8372d;
+  --success: #1f8a4c;
+  --warning: #b7791f;
+
+  /* Syntax highlighting (shared by previews and the CodeMirror theme) */
+  --syn-keyword: #8a3ab9;
+  --syn-type: #0f7a7a;
+  --syn-fn: #3049d8;
+  --syn-string: #2b7a3d;
+  --syn-number: #b45309;
+  --syn-comment: #8a8690;
+  --code-bg: #f7f5f0;
+
+  --shadow-color: 30 25 15;
+  --focus-ring: 0 0 0 2px var(--paper), 0 0 0 4px var(--accent);
+  color-scheme: light;
+}
+
+.dark {
+  --paper: #121115;
+  --surface: #1a191e;
+  --surface-2: #222127;
+  --surface-3: #2c2b32;
+  --line: #2e2d34;
+  --line-strong: #3d3b44;
+  --ink: #f2f0eb;
+  --ink-2: #c3c0c8;
+  --muted: #8e8a94;
+  --on-ink: #121115;
+
+  --accent: #7b8cff;
+  --accent-hover: #93a1ff;
+  --accent-soft: #23264a;
+  --accent-ink: #c4cbff;
+
+  --mark-green: #4cc27e;
+  --mark-green-soft: #16301f;
+  --mark-yellow: #e0a94a;
+  --mark-yellow-soft: #33280f;
+  --mark-red: #f0695e;
+  --mark-red-soft: #3a1714;
+
+  --cat-exam: #f0695e;
+  --cat-assignment: #7b8cff;
+  --cat-college: #a98bf0;
+  --cat-deadline: #e0a94a;
+  --cat-personal: #9aa2ad;
+
+  --danger: #f0695e;
+  --success: #4cc27e;
+  --warning: #e0a94a;
+
+  --syn-keyword: #d19af0;
+  --syn-type: #5fd3c8;
+  --syn-fn: #93a1ff;
+  --syn-string: #8fd694;
+  --syn-number: #f2b56b;
+  --syn-comment: #77737e;
+  --code-bg: #16151a;
+
+  --shadow-color: 0 0 0;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", monospace;
+
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--muted);
+  --color-on-ink: var(--on-ink);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+
+  --color-mark-green: var(--mark-green);
+  --color-mark-green-soft: var(--mark-green-soft);
+  --color-mark-yellow: var(--mark-yellow);
+  --color-mark-yellow-soft: var(--mark-yellow-soft);
+  --color-mark-red: var(--mark-red);
+  --color-mark-red-soft: var(--mark-red-soft);
+
+  --color-cat-exam: var(--cat-exam);
+  --color-cat-assignment: var(--cat-assignment);
+  --color-cat-college: var(--cat-college);
+  --color-cat-deadline: var(--cat-deadline);
+  --color-cat-personal: var(--cat-personal);
+
+  --color-syn-keyword: var(--syn-keyword);
+  --color-syn-type: var(--syn-type);
+  --color-syn-fn: var(--syn-fn);
+  --color-syn-string: var(--syn-string);
+  --color-syn-number: var(--syn-number);
+  --color-syn-comment: var(--syn-comment);
+  --color-code-bg: var(--code-bg);
+
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+
+  /* Radius: rounded, not bubbly */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --shadow-xs: 0 1px 2px rgb(var(--shadow-color) / 0.05);
+  --shadow-sm: 0 1px 2px rgb(var(--shadow-color) / 0.06), 0 1px 3px rgb(var(--shadow-color) / 0.06);
+  --shadow-md: 0 2px 4px rgb(var(--shadow-color) / 0.04), 0 8px 24px -6px rgb(var(--shadow-color) / 0.1);
+  --shadow-lg: 0 4px 8px rgb(var(--shadow-color) / 0.04), 0 24px 48px -12px rgb(var(--shadow-color) / 0.18);
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --animate-fade-up: fade-up 0.6s var(--ease-out) both;
+  --animate-fade-in: fade-in 0.3s var(--ease-out) both;
+
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-paper font-sans text-ink;
+    font-feature-settings: "cv11", "ss01";
+  }
+  ::selection {
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+  }
+  :focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+  [id] {
+    scroll-margin-top: 5rem;
+  }
+}
+
+/* Blinking cursor in the logo mark */
+@keyframes cj-blink {
+  0%,
+  55% {
+    opacity: 1;
+  }
+  56%,
+  100% {
+    opacity: 0.15;
+  }
+}
+.cj-cursor {
+  animation: cj-blink 1.2s steps(1) infinite;
+}
+
+/* Faint ruled-paper texture for hero backgrounds */
+.cj-ruled {
+  background-image: linear-gradient(to bottom, var(--line) 1px, transparent 1px);
+  background-size: 100% 32px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, black 20%, transparent 75%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
